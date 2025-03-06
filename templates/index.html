@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ứng dụng Chụp màn hình & OCR</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <style>
+        body {
+            padding-top: 20px;
+        }
+        .user-section {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        #screenshot-display {
+            width: 100%;
+            min-height: 300px;
+            border: 1px dashed #ccc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        #screenshot-display img {
+            max-width: 100%;
+            max-height: 300px;
+        }
+        #screenshot-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 9999;
+            display: none;
+            cursor: crosshair;
+        }
+        .capture-area {
+            position: absolute;
+            border: 2px solid #00aeef;
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+        #capture-instructions {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-size: 14px;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        #loading-indicator {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="user-section">
+            <div class="me-2">Xin chào, <strong>{{ username }}</strong></div>
+            <div class="dropdown">
+                <button class="btn btn-outline-secondary dropdown-toggle" type="button" id="userMenu" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="bi bi-person"></i>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userMenu">
+                    <li><a class="dropdown-item" href="{{ url_for('activation_status') }}">Trạng thái kích hoạt</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item" href="{{ url_for('logout') }}">Đăng xuất</a></li>
+                </ul>
+            </div>
+        </div>
+        
+        <h1 class="text-center mb-4">Ứng dụng Chụp màn hình & OCR</h1>
+        
+        <div id="screenshot-display">
+            <p id="no-image-text">Chưa có ảnh chụp</p>
+            <img id="preview-image" style="display: none;" alt="Screenshot preview">
+        </div>
+        
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5 class="card-title">Chế độ chụp:</h5>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="captureMode" id="fullScreenOption" checked>
+                    <label class="form-check-label" for="fullScreenOption">
+                        Chụp toàn màn hình
+                    </label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="captureMode" id="regionOption">
+                    <label class="form-check-label" for="regionOption">
+                        Chụp theo vùng kéo thả
+                    </label>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row mb-4">
+            <div class="col">
+                <button id="captureBtn" class="btn btn-primary w-100">Chụp màn hình</button>
+            </div>
+            <div class="col">
+                <button id="uploadBtn" class="btn btn-secondary w-100">Chọn ảnh từ file</button>
+                <input type="file" id="fileInput" accept="image/*" style="display: none;">
+            </div>
+            <div class="col">
+                <button id="copyBtn" class="btn btn-success w-100" disabled>Sao chép vào clipboard</button>
+            </div>
+            <div class="col">
+                <button id="ocrBtn" class="btn btn-info w-100" disabled>Nhận dạng văn bản (Gemini)</button>
+            </div>
+        </div>
+        
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5 class="card-title">Cài đặt Gemini API</h5>
+                <div class="mb-3">
+                    <label for="apiKeyInput" class="form-label">Gemini API Key</label>
+                    <div class="input-group">
+                        <input type="password" class="form-control" id="apiKeyInput" placeholder="Nhập API key của bạn">
+                        <button class="btn btn-outline-secondary" type="button" id="toggleApiKey">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                        <button class="btn btn-outline-primary" type="button" id="saveApiKey">Lưu</button>
+                    </div>
+                    <div class="form-text">API key sẽ được lưu trong trình duyệt của bạn. Đăng ký Gemini API key tại <a href="https://ai.google.dev/" target="_blank">Google AI</a></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="alert alert-info text-center">
+            Tính năng chụp màn hình trên trình duyệt yêu cầu quyền truy cập.
+        </div>
+        
+        <div id="resultContainer" class="mt-4" style="display: none;">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Kết quả nhận dạng văn bản</h5>
+                    <button id="copyTextBtn" class="btn btn-sm btn-outline-primary">Sao chép văn bản</button>
+                </div>
+                <div class="card-body">
+                    <textarea id="resultText" class="form-control" rows="10" readonly></textarea>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Screenshot overlay -->
+    <div id="screenshot-overlay">
+        <div id="capture-instructions">Kéo để chọn vùng chụp màn hình. Nhấn Esc để hủy.</div>
+        <div id="capture-area" class="capture-area"></div>
+    </div>
+
+    <!-- Loading indicator -->
+    <div id="loading-indicator">
+        <div class="spinner-border text-light me-2" role="status"></div>
+        <span>Đang xử lý...</span>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const screenshotDisplay = document.getElementById('screenshot-display');
+            const noImageText = document.getElementById('no-image-text');
+            const previewImage = document.getElementById('preview-image');
+            const captureBtn = document.getElementById('captureBtn');
+            const uploadBtn = document.getElementById('uploadBtn');
+            const fileInput = document.getElementById('fileInput');
+            const copyBtn = document.getElementById('copyBtn');
+            const ocrBtn = document.getElementById('ocrBtn');
+            const resultContainer = document.getElementById('resultContainer');
+            const resultText = document.getElementById('resultText');
+            const copyTextBtn = document.getElementById('copyTextBtn');
+            const fullScreenOption = document.getElementById('fullScreenOption');
+            const regionOption = document.getElementById('regionOption');
+            const screenshotOverlay = document.getElementById('screenshot-overlay');
+            const captureArea = document.getElementById('capture-area');
+            const loadingIndicator = document.getElementById('loading-indicator');
+            const apiKeyInput = document.getElementById('apiKeyInput');
+            const toggleApiKey = document.getElementById('toggleApiKey');
+            const saveApiKey = document.getElementById('saveApiKey');
+            
+            let currentScreenshot = null;
+            let startX, startY, isSelecting = false;
+            
+            // Load API key from localStorage
+            const savedApiKey = localStorage.getItem('geminiApiKey');
+            if (savedApiKey) {
+                apiKeyInput.value = savedApiKey;
+            }
+            
+            // Toggle API key visibility
+            toggleApiKey.addEventListener('click', () => {
+                if (apiKeyInput.type === 'password') {
+                    apiKeyInput.
+            
+            // Handle upload button
+            uploadBtn.addEventListener('click', () => {
+                fileInput.click();
+            });
+            
+            fileInput.addEventListener('change', async (e) => {
+                if (e.target.files.length > 0) {
+                    const file = e.target.files[0];
+                    const reader = new FileReader();
+                    
+                    reader.onload = async (event) => {
+                        const imgData = event.target.result;
+                        previewImage.src = imgData;
+                        previewImage.style.display = 'block';
+                        noImageText.style.display = 'none';
+                        currentScreenshot = imgData;
+                        
+                        // Enable buttons
+                        copyBtn.disabled = false;
+                        ocrBtn.disabled = false;
+                        
+                        // Upload to server
+                        await uploadImageToServer(file);
+                    };
+                    
+                    reader.readAsDataURL(file);
+                }
+            });
+            
+            // Handle capture button
+            captureBtn.addEventListener('click', async () => {
+                if (fullScreenOption.checked) {
+                    try {
+                        loadingIndicator.style.display = 'flex';
+                        const stream = await navigator.mediaDevices.getDisplayMedia({
+                            video: { mediaSource: "screen" }
+                        });
+                        
+                        const track = stream.getVideoTracks()[0];
+                        const imageCapture = new ImageCapture(track);
+                        const bitmap = await imageCapture.grabFrame();
+                        
+                        const canvas = document.createElement('canvas');
+                        canvas.width = bitmap.width;
+                        canvas.height = bitmap.height;
+                        const context = canvas.getContext('2d');
+                        context.drawImage(bitmap, 0, 0);
+                        
+                        currentScreenshot = canvas.toDataURL('image/png');
+                        previewImage.src = currentScreenshot;
+                        previewImage.style.display = 'block';
+                        noImageText.style.display = 'none';
+                        
+                        // Stop all tracks
+                        stream.getTracks().forEach(track => track.stop());
+                        
+                        // Enable buttons
+                        copyBtn.disabled = false;
+                        ocrBtn.disabled = false;
+                        
+                        // Upload to server
+                        await uploadScreenshotToServer(currentScreenshot);
+                        
+                    } catch (err) {
+                        console.error("Error capturing screenshot:", err);
+                        alert("Không thể chụp màn hình. Vui lòng kiểm tra quyền truy cập.");
+                    } finally {
+                        loadingIndicator.style.display = 'none';
+                    }
+                } else if (regionOption.checked) {
+                    try {
+                        const stream = await navigator.mediaDevices.getDisplayMedia({
+                            video: { mediaSource: "screen" }
+                        });
+                        
+                        const videoTrack = stream.getVideoTracks()[0];
+                        
+                        // Show overlay for selection
+                        screenshotOverlay.style.display = 'block';
+                        
+                        // Setup overlay drag events
+                        screenshotOverlay.addEventListener('mousedown', startSelection);
+                        screenshotOverlay.addEventListener('mousemove', updateSelection);
+                        screenshotOverlay.addEventListener('mouseup', endSelection);
+                        screenshotOverlay.addEventListener('keydown', cancelSelection);
+                        
+                        function startSelection(e) {
+                            startX = e.clientX;
+                            startY = e.clientY;
+                            isSelecting = true;
+                            
+                            captureArea.style.left = startX + 'px';
+                            captureArea.style.top = startY + 'px';
+                            captureArea.style.width = '0px';
+                            captureArea.style.height = '0px';
+                            captureArea.style.display = 'block';
+                        }
+                        
+                        function updateSelection(e) {
+                            if (!isSelecting) return;
+                            
+                            const width = e.clientX - startX;
+                            const height = e.clientY - startY;
+                            
+                            captureArea.style.width = Math.abs(width) + 'px';
+                            captureArea.style.height = Math.abs(height) + 'px';
+                            captureArea.style.left = (width < 0 ? e.clientX : startX) + 'px';
+                            captureArea.style.top = (height < 0 ? e.clientY : startY) + 'px';
+                        }
+                        
+                        async function endSelection(e) {
+                            if (!isSelecting) return;
+                            isSelecting = false;
+                            
+                            // Calculate dimensions
+                            const captureRect = captureArea.getBoundingClientRect();
+                            
+                            // Ensure minimum size
+                            if (captureRect.width < 10 || captureRect.height < 10) {
+                                alert("Vùng chọn quá nhỏ. Vui lòng thử lại.");
+                                cleanup();
+                                return;
+                            }
+                            
+                            try {
+                                loadingIndicator.style.display = 'flex';
+                                
+                                // Create video element to grab frame
+                                const video = document.createElement('video');
+                                video.srcObject = stream;
+                                await video.play();
+                                
+                                // Create canvas for cropping
+                                const canvas = document.createElement('canvas');
+                                canvas.width = captureRect.width;
+                                canvas.height = captureRect.height;
+                                const ctx = canvas.getContext('2d');
+                                
+                                // Draw only the selected portion
+                                ctx.drawImage(video, 
+                                    captureRect.left, captureRect.top, captureRect.width, captureRect.height,
+                                    0, 0, captureRect.width, captureRect.height);
+                                
+                                currentScreenshot = canvas.toDataURL('image/png');
+                                previewImage.src = currentScreenshot;
+                                previewImage.style.display = 'block';
+                                noImageText.style.display = 'none';
+                                
+                                // Enable buttons
+                                copyBtn.disabled = false;
+                                ocrBtn.disabled = false;
+                                
+                                // Upload to server
+                                await uploadScreenshotToServer(currentScreenshot);
+                                
+                            } catch (err) {
+                                console.error("Error capturing region:", err);
+                                alert("Không thể chụp vùng màn hình đã chọn.");
+                            } finally {
+                                loadingIndicator.style.display = 'none';
+                                cleanup();
+                            }
+                        }
+                        
+                        function cancelSelection(e) {
+                            if (e.key === 'Escape') {
+                                cleanup();
+                            }
+                        }
+                        
+                        function cleanup() {
+                            // Hide overlay
+                            screenshotOverlay.style.display = 'none';
+                            captureArea.style.display = 'none';
+                            
+                            // Remove event listeners
+                            screenshotOverlay.removeEventListener('mousedown', startSelection);
+                            screenshotOverlay.removeEventListener('mousemove', updateSelection);
+                            screenshotOverlay.removeEventListener('mouseup', endSelection);
+                            screenshotOverlay.removeEventListener('keydown', cancelSelection);
+                            
+                            // Stop all tracks
+                            stream.getTracks().forEach(track => track.stop());
+                        }
+                    } catch (err) {
+                        console.error("Error setting up screen capture:", err);
+                        alert("Không thể chụp màn hình. Vui lòng kiểm tra quyền truy cập.");
+                    }
+                }
+            });
+            
+            // Copy screenshot to clipboard
+            copyBtn.addEventListener('click', async () => {
+                if (currentScreenshot) {
+                    try {
+                        const response = await fetch(currentScreenshot);
+                        const blob = await response.blob();
+                        await navigator.clipboard.write([
+                            new ClipboardItem({
+                                [blob.type]: blob
+                            })
+                        ]);
+                        alert("Đã sao chép ảnh vào clipboard!");
+                    } catch (err) {
+                        console.error("Error copying to clipboard:", err);
+                        alert("Không thể sao chép ảnh vào clipboard. Trình duyệt của bạn có thể không hỗ trợ tính năng này.");
+                    }
+                }
+            });
+            
+            // OCR button
+            ocrBtn.addEventListener('click', async () => {
+                if (currentScreenshot) {
+                    try {
+                        loadingIndicator.style.display = 'flex';
+                        
+                        const response = await fetch('/extract-text', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            }
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (data.success) {
+                            resultText.value = data.text;
+                            resultContainer.style.display = 'block';
+                        } else {
+                            throw new Error(data.error || "Không thể nhận dạng văn bản");
+                        }
+                    } catch (err) {
+                        console.error("Error extracting text:", err);
+                        alert("Không thể nhận dạng văn bản: " + err.message);
+                    } finally {
+                        loadingIndicator.style.display = 'none';
+                    }
+                }
+            });
+            
+            // Copy text button
+            copyTextBtn.addEventListener('click', () => {
+                resultText.select();
+                document.execCommand('copy');
+                alert("Đã sao chép văn bản vào clipboard!");
+            });
+            
+            // Upload image to server
+            async function uploadImageToServer(file) {
+                try {
+                    loadingIndicator.style.display = 'flex';
+                    
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    
+                    const response = await fetch('/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (!data.success) {
+                        throw new Error(data.error || "Không thể tải ảnh lên máy chủ");
+                    }
+                } catch (err) {
+                    console.error("Error uploading image:", err);
+                    alert("Không thể tải ảnh lên máy chủ: " + err.message);
+                } finally {
+                    loadingIndicator.style.display = 'none';
+                }
+            }
+            
+            // Upload screenshot to server
+            async function uploadScreenshotToServer(screenshotData) {
+                try {
+                    loadingIndicator.style.display = 'flex';
+                    
+                    const formData = new FormData();
+                    formData.append('screenshot', screenshotData);
+                    
+                    const response = await fetch('/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (!data.success) {
+                        throw new Error(data.error || "Không thể tải ảnh lên máy chủ");
+                    }
+                } catch (err) {
+                    console.error("Error uploading screenshot:", err);
+                    alert("Không thể tải ảnh lên máy chủ: " + err.message);
+                } finally {
+                    loadingIndicator.style.display = 'none';
+                }
+            }
+        });
+    </script>
+</body>
+</html>
