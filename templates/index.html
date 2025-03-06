@@ -210,7 +210,24 @@
             // Toggle API key visibility
             toggleApiKey.addEventListener('click', () => {
                 if (apiKeyInput.type === 'password') {
-                    apiKeyInput.
+                    apiKeyInput.type = 'text';
+                    toggleApiKey.innerHTML = '<i class="bi bi-eye-slash"></i>';
+                } else {
+                    apiKeyInput.type = 'password';
+                    toggleApiKey.innerHTML = '<i class="bi bi-eye"></i>';
+                }
+            });
+            
+            // Save API key to localStorage
+            saveApiKey.addEventListener('click', () => {
+                const apiKey = apiKeyInput.value.trim();
+                if (apiKey) {
+                    localStorage.setItem('geminiApiKey', apiKey);
+                    alert('API key saved successfully!');
+                } else {
+                    alert('Please enter a valid API key');
+                }
+            });
             
             // Handle upload button
             uploadBtn.addEventListener('click', () => {
