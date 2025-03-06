@@ -217,15 +217,15 @@
                     toggleApiKey.innerHTML = '<i class="bi bi-eye"></i>';
                 }
             });
-            
+
             // Save API key to localStorage
             saveApiKey.addEventListener('click', () => {
                 const apiKey = apiKeyInput.value.trim();
                 if (apiKey) {
                     localStorage.setItem('geminiApiKey', apiKey);
-                    alert('API key saved successfully!');
+                    alert('API key đã được lưu thành công!');
                 } else {
-                    alert('Please enter a valid API key');
+                    alert('Vui lòng nhập API key hợp lệ');
                 }
             });
             
@@ -261,11 +261,22 @@
             // Handle capture button
             captureBtn.addEventListener('click', async () => {
                 if (fullScreenOption.checked) {
+                    // Hiển thị loading
+                    loadingIndicator.style.display = 'flex';
+                    
+                    // Đặt timeout để tự động ẩn loading nếu có vấn đề
+                    const loadingTimeout = setTimeout(() => {
+                        loadingIndicator.style.display = 'none';
+                        alert('Quá trình chụp màn hình bị hủy do quá thời gian. Vui lòng thử lại hoặc sử dụng tính năng tải lên file.');
+                    }, 15000); // 15 giây timeout
+                    
                     try {
-                        loadingIndicator.style.display = 'flex';
                         const stream = await navigator.mediaDevices.getDisplayMedia({
                             video: { mediaSource: "screen" }
                         });
+                        
+                        // Xóa timeout vì đã nhận được stream
+                        clearTimeout(loadingTimeout);
                         
                         const track = stream.getVideoTracks()[0];
                         const imageCapture = new ImageCapture(track);
@@ -293,9 +304,21 @@
                         await uploadScreenshotToServer(currentScreenshot);
                         
                     } catch (err) {
+                        // Xóa timeout vì đã có lỗi
+                        clearTimeout(loadingTimeout);
+                        
                         console.error("Error capturing screenshot:", err);
-                        alert("Không thể chụp màn hình. Vui lòng kiểm tra quyền truy cập.");
+                        
+                        // Hiển thị thông báo lỗi cụ thể
+                        if (err.name === 'NotAllowedError') {
+                            alert("Quyền truy cập bị từ chối. Vui lòng cho phép truy cập màn hình để sử dụng tính năng này.");
+                        } else if (err.name === 'NotFoundError') {
+                            alert("Không tìm thấy nguồn màn hình. Vui lòng thử lại.");
+                        } else {
+                            alert("Không thể chụp màn hình: " + err.message);
+                        }
                     } finally {
+                        // Đảm bảo ẩn loading trong mọi trường hợp
                         loadingIndicator.style.display = 'none';
                     }
                 } else if (regionOption.checked) {
@@ -386,7 +409,7 @@
                                 
                             } catch (err) {
                                 console.error("Error capturing region:", err);
-                                alert("Không thể chụp vùng màn hình đã chọn.");
+                                alert("Không thể chụp vùng màn hình đã chọn: " + err.message);
                             } finally {
                                 loadingIndicator.style.display = 'none';
                                 cleanup();
@@ -415,7 +438,8 @@
                         }
                     } catch (err) {
                         console.error("Error setting up screen capture:", err);
-                        alert("Không thể chụp màn hình. Vui lòng kiểm tra quyền truy cập.");
+                        alert("Không thể chụp màn hình: " + err.message);
+                        loadingIndicator.style.display = 'none';
                     }
                 }
             });
@@ -445,11 +469,15 @@
                     try {
                         loadingIndicator.style.display = 'flex';
                         
+                        // Lấy API key từ input hoặc localStorage
+                        const apiKey = apiKeyInput.value.trim() || localStorage.getItem('geminiApiKey');
+                        
                         const response = await fetch('/extract-text', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
-                            }
+                            },
+                            body: JSON.stringify({ api_key: apiKey })
                         });
                         
                         const data = await response.json();
