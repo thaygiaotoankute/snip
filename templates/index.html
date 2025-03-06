@@ -6,6 +6,7 @@
     <title>Ứng dụng Chụp màn hình & OCR</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
     <style>
         body {
             padding-top: 20px;
@@ -56,7 +57,7 @@
             border-radius: 5px;
         }
         #loading-indicator {
-            display: none;
+            display: none !important;
             position: fixed;
             top: 0;
             left: 0;
@@ -64,15 +65,32 @@
             height: 100%;
             background-color: rgba(0, 0, 0, 0.5);
             z-index: 10000;
-            display: flex;
             align-items: center;
             justify-content: center;
             color: white;
             font-size: 20px;
         }
+        #resetBtn {
+            margin-top: 10px;
+        }
     </style>
 </head>
 <body>
+    <script>
+        // Ẩn loading indicator ngay lập tức
+        window.onload = function() {
+            document.getElementById('loading-indicator').style.display = 'none';
+        }
+          
+        // Thiết lập interval để liên tục ẩn indicator mỗi 2 giây
+        setInterval(function() {
+            const loadingIndicator = document.getElementById('loading-indicator');
+            if (loadingIndicator && loadingIndicator.style.display !== 'none') {
+                loadingIndicator.style.display = 'none';
+            }
+        }, 2000);
+    </script>
+
     <div class="container">
         <div class="user-section">
             <div class="me-2">Xin chào, <strong>{{ username }}</strong></div>
@@ -110,6 +128,12 @@
                         Chụp theo vùng kéo thả
                     </label>
                 </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="captureMode" id="elementOption">
+                    <label class="form-check-label" for="elementOption">
+                        Chụp theo element
+                    </label>
+                </div>
             </div>
         </div>
         
@@ -128,8 +152,12 @@
                 <button id="ocrBtn" class="btn btn-info w-100" disabled>Nhận dạng văn bản (Gemini)</button>
             </div>
         </div>
+
+        <div class="text-center">
+            <button id="resetBtn" class="btn btn-danger">Reset trạng thái</button>
+        </div>
         
-        <div class="card mb-4">
+        <div class="card mb-4 mt-4">
             <div class="card-body">
                 <h5 class="card-title">Cài đặt Gemini API</h5>
                 <div class="mb-3">
@@ -191,15 +219,42 @@
             const copyTextBtn = document.getElementById('copyTextBtn');
             const fullScreenOption = document.getElementById('fullScreenOption');
             const regionOption = document.getElementById('regionOption');
+            const elementOption = document.getElementById('elementOption');
             const screenshotOverlay = document.getElementById('screenshot-overlay');
             const captureArea = document.getElementById('capture-area');
             const loadingIndicator = document.getElementById('loading-indicator');
             const apiKeyInput = document.getElementById('apiKeyInput');
             const toggleApiKey = document.getElementById('toggleApiKey');
             const saveApiKey = document.getElementById('saveApiKey');
+            const resetBtn = document.getElementById('resetBtn');
             
             let currentScreenshot = null;
             let startX, startY, isSelecting = false;
+            
+            // Reset button handler
+            resetBtn.addEventListener('click', () => {
+                // Ẩn loading indicator
+                loadingIndicator.style.display = 'none';
+                
+                // Reset giao diện
+                previewImage.style.display = 'none';
+                noImageText.style.display = 'block';
+                currentScreenshot = null;
+                
+                // Disable buttons
+                copyBtn.disabled = true;
+                ocrBtn.disabled = true;
+                
+                // Ẩn kết quả
+                resultContainer.style.display = 'none';
+                
+                // Reset overlay
+                screenshotOverlay.style.display = 'none';
+                captureArea.style.display = 'none';
+                
+                // Redirect to reset route
+                window.location.href = '/reset';
+            });
             
             // Load API key from localStorage
             const savedApiKey = localStorage.getItem('geminiApiKey');
@@ -258,43 +313,149 @@
                 }
             });
             
-            // Handle capture button
-            captureBtn.addEventListener('click', async () => {
-                if (fullScreenOption.checked) {
-                    // Hiển thị loading
-                    loadingIndicator.style.display = 'flex';
+            // Smart Capture function
+            const smartCapture = async (elementId) => {
+                // Hiển thị loading indicator với setTimeout để đảm bảo nó biến mất
+                showLoadingWithTimeout();
+                
+                try {
+                    // Ưu tiên sử dụng html2canvas nếu có sẵn
+                    if (typeof html2canvas !== 'undefined' && elementId) {
+                        return await captureElement(elementId);
+                    }
                     
-                    // Đặt timeout để tự động ẩn loading nếu có vấn đề
-                    const loadingTimeout = setTimeout(() => {
-                        loadingIndicator.style.display = 'none';
-                        alert('Quá trình chụp màn hình bị hủy do quá thời gian. Vui lòng thử lại hoặc sử dụng tính năng tải lên file.');
-                    }, 15000); // 15 giây timeout
-                    
-                    try {
+                    // Nếu không có elementId hoặc không có html2canvas, thử dùng getDisplayMedia
+                    if ('getDisplayMedia' in navigator.mediaDevices) {
                         const stream = await navigator.mediaDevices.getDisplayMedia({
                             video: { mediaSource: "screen" }
                         });
                         
-                        // Xóa timeout vì đã nhận được stream
-                        clearTimeout(loadingTimeout);
+                        if (elementId) {
+                            return await cropStreamToElement(stream, elementId);
+                        } else {
+                            return await captureFullStream(stream);
+                        }
+                    }
+                    
+                    throw new Error('Trình duyệt không hỗ trợ chụp màn hình');
+                } catch (err) {
+                    console.error("Error in smartCapture:", err);
+                    loadingIndicator.style.display = 'none';
+                    alert(err.message || "Không thể chụp màn hình");
+                    throw err;
+                } finally {
+                    loadingIndicator.style.display = 'none';
+                }
+            };
+            
+            const captureElement = async (elementId) => {
+                const element = document.getElementById(elementId);
+                if (!element) throw new Error('Không tìm thấy element');
+                
+                try {
+                    const canvas = await html2canvas(element, {
+                        useCORS: true,
+                        allowTaint: true,
+                        logging: false
+                    });
+                    return canvas.toDataURL('image/png');
+                } catch (err) {
+                    console.error('html2canvas error:', err);
+                    throw new Error('Không thể chụp element: ' + err.message);
+                }
+            };
+            
+            const cropStreamToElement = async (stream, elementId) => {
+                const element = document.getElementById(elementId);
+                if (!element) throw new Error('Không tìm thấy element');
+                
+                try {
+                    const video = document.createElement('video');
+                    video.srcObject = stream;
+                    
+                    // Đảm bảo video đã sẵn sàng
+                    await new Promise((resolve) => {
+                        video.onloadedmetadata = () => {
+                            video.play().then(resolve);
+                        };
+                    });
+                    
+                    // Lấy vị trí của element trên trang
+                    const rect = element.getBoundingClientRect();
+                    
+                    // Tạo canvas để vẽ phần đã cắt
+                    const canvas = document.createElement('canvas');
+                    canvas.width = rect.width;
+                    canvas.height = rect.height;
+                    const ctx = canvas.getContext('2d');
+                    
+                    // Vẽ phần cắt từ video
+                    ctx.drawImage(video, rect.left, rect.top, rect.width, rect.height, 
+                                0, 0, rect.width, rect.height);
+                    
+                    // Dừng stream sau khi xử lý
+                    stream.getTracks().forEach(track => track.stop());
+                    
+                    return canvas.toDataURL('image/png');
+                } catch (err) {
+                    // Đảm bảo dừng stream trong trường hợp lỗi
+                    stream.getTracks().forEach(track => track.stop());
+                    throw err;
+                }
+            };
+            
+            const captureFullStream = async (stream) => {
+                try {
+                    const video = document.createElement('video');
+                    video.srcObject = stream;
+                    
+                    // Đảm bảo video đã sẵn sàng
+                    await new Promise((resolve) => {
+                        video.onloadedmetadata = () => {
+                            video.play().then(resolve);
+                        };
+                    });
+                    
+                    // Tạo canvas có kích thước bằng video
+                    const canvas = document.createElement('canvas');
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    const ctx = canvas.getContext('2d');
+                    
+                    // Vẽ video lên canvas
+                    ctx.drawImage(video, 0, 0);
+                    
+                    // Dừng stream sau khi xử lý
+                    stream.getTracks().forEach(track => track.stop());
+                    
+                    return canvas.toDataURL('image/png');
+                } catch (err) {
+                    // Đảm bảo dừng stream trong trường hợp lỗi
+                    stream.getTracks().forEach(track => track.stop());
+                    throw err;
+                }
+            };
+            
+            // Hiển thị loading với timeout để đảm bảo nó luôn biến mất
+            const showLoadingWithTimeout = () => {
+                loadingIndicator.style.display = 'flex';
+                setTimeout(() => {
+                    loadingIndicator.style.display = 'none';
+                }, 20000); // 20 giây timeout
+            };
+            
+            // Handle capture button
+            captureBtn.addEventListener('click', async () => {
+                try {
+                    if (fullScreenOption.checked) {
+                        // Sử dụng smart capture cho toàn màn hình
+                        showLoadingWithTimeout();
+                        currentScreenshot = await smartCapture();
                         
-                        const track = stream.getVideoTracks()[0];
-                        const imageCapture = new ImageCapture(track);
-                        const bitmap = await imageCapture.grabFrame();
-                        
-                        const canvas = document.createElement('canvas');
-                        canvas.width = bitmap.width;
-                        canvas.height = bitmap.height;
-                        const context = canvas.getContext('2d');
-                        context.drawImage(bitmap, 0, 0);
-                        
-                        currentScreenshot = canvas.toDataURL('image/png');
+                        // Hiển thị ảnh
                         previewImage.src = currentScreenshot;
                         previewImage.style.display = 'block';
                         noImageText.style.display = 'none';
-                        
-                        // Stop all tracks
-                        stream.getTracks().forEach(track => track.stop());
                         
                         // Enable buttons
                         copyBtn.disabled = false;
@@ -302,145 +463,147 @@
                         
                         // Upload to server
                         await uploadScreenshotToServer(currentScreenshot);
+                    } else if (elementOption.checked) {
+                        // Chụp theo element (screenshot-display)
+                        showLoadingWithTimeout();
+                        currentScreenshot = await smartCapture('screenshot-display');
                         
-                    } catch (err) {
-                        // Xóa timeout vì đã có lỗi
-                        clearTimeout(loadingTimeout);
+                        // Hiển thị ảnh
+                        previewImage.src = currentScreenshot;
+                        previewImage.style.display = 'block';
+                        noImageText.style.display = 'none';
                         
-                        console.error("Error capturing screenshot:", err);
+                        // Enable buttons
+                        copyBtn.disabled = false;
+                        ocrBtn.disabled = false;
                         
-                        // Hiển thị thông báo lỗi cụ thể
-                        if (err.name === 'NotAllowedError') {
-                            alert("Quyền truy cập bị từ chối. Vui lòng cho phép truy cập màn hình để sử dụng tính năng này.");
-                        } else if (err.name === 'NotFoundError') {
-                            alert("Không tìm thấy nguồn màn hình. Vui lòng thử lại.");
-                        } else {
+                        // Upload to server
+                        await uploadScreenshotToServer(currentScreenshot);
+                    } else if (regionOption.checked) {
+                        try {
+                            const stream = await navigator.mediaDevices.getDisplayMedia({
+                                video: { mediaSource: "screen" }
+                            });
+                            
+                            const videoTrack = stream.getVideoTracks()[0];
+                            
+                            // Show overlay for selection
+                            screenshotOverlay.style.display = 'block';
+                            
+                            // Setup overlay drag events
+                            screenshotOverlay.addEventListener('mousedown', startSelection);
+                            screenshotOverlay.addEventListener('mousemove', updateSelection);
+                            screenshotOverlay.addEventListener('mouseup', endSelection);
+                            screenshotOverlay.addEventListener('keydown', cancelSelection);
+                            
+                            function startSelection(e) {
+                                startX = e.clientX;
+                                startY = e.clientY;
+                                isSelecting = true;
+                                
+                                captureArea.style.left = startX + 'px';
+                                captureArea.style.top = startY + 'px';
+                                captureArea.style.width = '0px';
+                                captureArea.style.height = '0px';
+                                captureArea.style.display = 'block';
+                            }
+                            
+                            function updateSelection(e) {
+                                if (!isSelecting) return;
+                                
+                                const width = e.clientX - startX;
+                                const height = e.clientY - startY;
+                                
+                                captureArea.style.width = Math.abs(width) + 'px';
+                                captureArea.style.height = Math.abs(height) + 'px';
+                                captureArea.style.left = (width < 0 ? e.clientX : startX) + 'px';
+                                captureArea.style.top = (height < 0 ? e.clientY : startY) + 'px';
+                            }
+                            
+                            async function endSelection(e) {
+                                if (!isSelecting) return;
+                                isSelecting = false;
+                                
+                                // Calculate dimensions
+                                const captureRect = captureArea.getBoundingClientRect();
+                                
+                                // Ensure minimum size
+                                if (captureRect.width < 10 || captureRect.height < 10) {
+                                    alert("Vùng chọn quá nhỏ. Vui lòng thử lại.");
+                                    cleanup();
+                                    return;
+                                }
+                                
+                                try {
+                                    showLoadingWithTimeout();
+                                    
+                                    // Create video element to grab frame
+                                    const video = document.createElement('video');
+                                    video.srcObject = stream;
+                                    await video.play();
+                                    
+                                    // Create canvas for cropping
+                                    const canvas = document.createElement('canvas');
+                                    canvas.width = captureRect.width;
+                                    canvas.height = captureRect.height;
+                                    const ctx = canvas.getContext('2d');
+                                    
+                                    // Draw only the selected portion
+                                    ctx.drawImage(video, 
+                                        captureRect.left, captureRect.top, captureRect.width, captureRect.height,
+                                        0, 0, captureRect.width, captureRect.height);
+                                    
+                                    currentScreenshot = canvas.toDataURL('image/png');
+                                    previewImage.src = currentScreenshot;
+                                    previewImage.style.display = 'block';
+                                    noImageText.style.display = 'none';
+                                    
+                                    // Enable buttons
+                                    copyBtn.disabled = false;
+                                    ocrBtn.disabled = false;
+                                    
+                                    // Upload to server
+                                    await uploadScreenshotToServer(currentScreenshot);
+                                    
+                                } catch (err) {
+                                    console.error("Error capturing region:", err);
+                                    alert("Không thể chụp vùng màn hình đã chọn: " + err.message);
+                                } finally {
+                                    loadingIndicator.style.display = 'none';
+                                    cleanup();
+                                }
+                            }
+                            
+                            function cancelSelection(e) {
+                                if (e.key === 'Escape') {
+                                    cleanup();
+                                }
+                            }
+                            
+                            function cleanup() {
+                                // Hide overlay
+                                screenshotOverlay.style.display = 'none';
+                                captureArea.style.display = 'none';
+                                
+                                // Remove event listeners
+                                screenshotOverlay.removeEventListener('mousedown', startSelection);
+                                screenshotOverlay.removeEventListener('mousemove', updateSelection);
+                                screenshotOverlay.removeEventListener('mouseup', endSelection);
+                                screenshotOverlay.removeEventListener('keydown', cancelSelection);
+                                
+                                // Stop all tracks
+                                stream.getTracks().forEach(track => track.stop());
+                            }
+                        } catch (err) {
+                            console.error("Error setting up screen capture:", err);
                             alert("Không thể chụp màn hình: " + err.message);
+                            loadingIndicator.style.display = 'none';
                         }
-                    } finally {
-                        // Đảm bảo ẩn loading trong mọi trường hợp
-                        loadingIndicator.style.display = 'none';
                     }
-                } else if (regionOption.checked) {
-                    try {
-                        const stream = await navigator.mediaDevices.getDisplayMedia({
-                            video: { mediaSource: "screen" }
-                        });
-                        
-                        const videoTrack = stream.getVideoTracks()[0];
-                        
-                        // Show overlay for selection
-                        screenshotOverlay.style.display = 'block';
-                        
-                        // Setup overlay drag events
-                        screenshotOverlay.addEventListener('mousedown', startSelection);
-                        screenshotOverlay.addEventListener('mousemove', updateSelection);
-                        screenshotOverlay.addEventListener('mouseup', endSelection);
-                        screenshotOverlay.addEventListener('keydown', cancelSelection);
-                        
-                        function startSelection(e) {
-                            startX = e.clientX;
-                            startY = e.clientY;
-                            isSelecting = true;
-                            
-                            captureArea.style.left = startX + 'px';
-                            captureArea.style.top = startY + 'px';
-                            captureArea.style.width = '0px';
-                            captureArea.style.height = '0px';
-                            captureArea.style.display = 'block';
-                        }
-                        
-                        function updateSelection(e) {
-                            if (!isSelecting) return;
-                            
-                            const width = e.clientX - startX;
-                            const height = e.clientY - startY;
-                            
-                            captureArea.style.width = Math.abs(width) + 'px';
-                            captureArea.style.height = Math.abs(height) + 'px';
-                            captureArea.style.left = (width < 0 ? e.clientX : startX) + 'px';
-                            captureArea.style.top = (height < 0 ? e.clientY : startY) + 'px';
-                        }
-                        
-                        async function endSelection(e) {
-                            if (!isSelecting) return;
-                            isSelecting = false;
-                            
-                            // Calculate dimensions
-                            const captureRect = captureArea.getBoundingClientRect();
-                            
-                            // Ensure minimum size
-                            if (captureRect.width < 10 || captureRect.height < 10) {
-                                alert("Vùng chọn quá nhỏ. Vui lòng thử lại.");
-                                cleanup();
-                                return;
-                            }
-                            
-                            try {
-                                loadingIndicator.style.display = 'flex';
-                                
-                                // Create video element to grab frame
-                                const video = document.createElement('video');
-                                video.srcObject = stream;
-                                await video.play();
-                                
-                                // Create canvas for cropping
-                                const canvas = document.createElement('canvas');
-                                canvas.width = captureRect.width;
-                                canvas.height = captureRect.height;
-                                const ctx = canvas.getContext('2d');
-                                
-                                // Draw only the selected portion
-                                ctx.drawImage(video, 
-                                    captureRect.left, captureRect.top, captureRect.width, captureRect.height,
-                                    0, 0, captureRect.width, captureRect.height);
-                                
-                                currentScreenshot = canvas.toDataURL('image/png');
-                                previewImage.src = currentScreenshot;
-                                previewImage.style.display = 'block';
-                                noImageText.style.display = 'none';
-                                
-                                // Enable buttons
-                                copyBtn.disabled = false;
-                                ocrBtn.disabled = false;
-                                
-                                // Upload to server
-                                await uploadScreenshotToServer(currentScreenshot);
-                                
-                            } catch (err) {
-                                console.error("Error capturing region:", err);
-                                alert("Không thể chụp vùng màn hình đã chọn: " + err.message);
-                            } finally {
-                                loadingIndicator.style.display = 'none';
-                                cleanup();
-                            }
-                        }
-                        
-                        function cancelSelection(e) {
-                            if (e.key === 'Escape') {
-                                cleanup();
-                            }
-                        }
-                        
-                        function cleanup() {
-                            // Hide overlay
-                            screenshotOverlay.style.display = 'none';
-                            captureArea.style.display = 'none';
-                            
-                            // Remove event listeners
-                            screenshotOverlay.removeEventListener('mousedown', startSelection);
-                            screenshotOverlay.removeEventListener('mousemove', updateSelection);
-                            screenshotOverlay.removeEventListener('mouseup', endSelection);
-                            screenshotOverlay.removeEventListener('keydown', cancelSelection);
-                            
-                            // Stop all tracks
-                            stream.getTracks().forEach(track => track.stop());
-                        }
-                    } catch (err) {
-                        console.error("Error setting up screen capture:", err);
-                        alert("Không thể chụp màn hình: " + err.message);
-                        loadingIndicator.style.display = 'none';
-                    }
+                } catch (err) {
+                    console.error("Error in capture process:", err);
+                    alert("Lỗi khi chụp màn hình: " + err.message);
+                    loadingIndicator.style.display = 'none';
                 }
             });
             
@@ -467,7 +630,7 @@
             ocrBtn.addEventListener('click', async () => {
                 if (currentScreenshot) {
                     try {
-                        loadingIndicator.style.display = 'flex';
+                        showLoadingWithTimeout();
                         
                         // Lấy API key từ input hoặc localStorage
                         const apiKey = apiKeyInput.value.trim() || localStorage.getItem('geminiApiKey');
@@ -507,7 +670,7 @@
             // Upload image to server
             async function uploadImageToServer(file) {
                 try {
-                    loadingIndicator.style.display = 'flex';
+                    showLoadingWithTimeout();
                     
                     const formData = new FormData();
                     formData.append('file', file);
@@ -533,7 +696,7 @@
             // Upload screenshot to server
             async function uploadScreenshotToServer(screenshotData) {
                 try {
-                    loadingIndicator.style.display = 'flex';
+                    showLoadingWithTimeout();
                     
                     const formData = new FormData();
                     formData.append('screenshot', screenshotData);
@@ -555,6 +718,9 @@
                     loadingIndicator.style.display = 'none';
                 }
             }
+            
+            // Force hide loading indicator on page load
+            loadingIndicator.style.display = 'none';
         });
     </script>
 </body>
